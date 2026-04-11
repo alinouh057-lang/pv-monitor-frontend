@@ -40,9 +40,13 @@
 
 // ============================================================
 // 1. CONFIGURATION DE BASE
-// ============================================================|| 'http://localhost:8000'
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ;
+// ============================================================
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 console.log('🚀 API_BASE =', API_BASE);
+
+// ✅ FIX CORS/NGROK : Header requis pour bypasser la page d'avertissement ngrok
+// et pour que les requêtes cross-origin fonctionnent correctement
+const NGROK_HEADER = { 'ngrok-skip-browser-warning': 'true' };
 
 // ============================================================
 // 2. TYPES ET INTERFACES
@@ -137,8 +141,6 @@ export interface Recommendation {
 /**
  * Dispositif ESP32
  */
-// Dans lib/api.ts, ajouter les champs latitude et longitude
-
 export interface Device {
   device_id: string;
   name: string;
@@ -510,7 +512,10 @@ export async function initTimezone(): Promise<string> {
   try {
     await fetch(`${API_BASE}/api/v1/user/timezone`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify({ timezone: userTimezone })
     });
   } catch (error) {
@@ -550,12 +555,10 @@ export function getAuthToken(): string | null {
   if (authToken && authToken !== 'undefined' && authToken !== 'null') return authToken;
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('auth_token');
-    // Nettoyer les tokens invalides
     if (token && token !== 'undefined' && token !== 'null' && token !== '') {
       authToken = token;
       return token;
     }
-    // Supprimer les tokens invalides
     localStorage.removeItem('auth_token');
     authToken = null;
   }
@@ -576,11 +579,12 @@ export async function registerDevice(deviceId: string = 'dashboard'): Promise<bo
       location: 'Browser Client'
     };
     
-    console.log('📤 [registerDevice] Données envoyées:', deviceData);
-    
     const response = await fetch(`${API_BASE}/api/v1/auth/register-device`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify(deviceData)
     });
     
@@ -617,6 +621,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
     ...options.headers,
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     'X-Timezone': getUserTimezone(),
+    ...NGROK_HEADER, // ✅ FIX NGROK — bypass avertissement ngrok + fix CORS
   };
   
   try {
@@ -632,6 +637,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
           ...options.headers,
           'Authorization': `Bearer ${newToken}`,
           'X-Timezone': getUserTimezone(),
+          ...NGROK_HEADER, // ✅ FIX NGROK
         };
         return fetch(url, { ...options, headers: newHeaders });
       }
@@ -704,14 +710,9 @@ export async function fetchLatest(deviceId?: string): Promise<Measurement | null
 
 export async function fetchAllHistory(): Promise<Measurement[]> {
   try {
-    // 1. Récupérer le total
     const firstPage = await fetchHistory(0, 1);
     const total = firstPage.total;
-    
-    // 2. Si pas de données
     if (total === 0) return [];
-    
-    // 3. Récupérer tout
     const allData = await fetchHistory(0, total);
     return allData.data;
   } catch (error) {
@@ -745,13 +746,7 @@ export async function fetchHistory(
     const data = await res.json();
     return data;
   } catch {
-    return {
-      total: 0,
-      skip: 0,
-      limit: 20,
-      has_more: false,
-      data: []
-    };
+    return { total: 0, skip: 0, limit: 20, has_more: false, data: [] };
   }
 }
 
@@ -782,7 +777,9 @@ export async function fetchRecommendation(deviceId?: string): Promise<Recommenda
 
 export async function fetchHeartbeat(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/v1/heartbeat`);
+    const res = await fetch(`${API_BASE}/api/v1/heartbeat`, {
+      headers: { ...NGROK_HEADER }, // ✅ FIX NGROK
+    });
     const data = await res.json();
     const devices = Object.values(data.devices) as any[];
     return devices.some(d => d.online);
@@ -804,11 +801,11 @@ export async function analyzeImage(file: File): Promise<any> {
 
   try {
     console.log('📤 [analyzeImage] Début - Fichier:', file.name, file.size, 'bytes');
-    console.log('📤 [analyzeImage] URL:', `${API_BASE}/api/v1/analyze`);
     
     const token = getAuthToken();
     const headers: Record<string, string> = {
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     if (token) {
@@ -826,11 +823,7 @@ export async function analyzeImage(file: File): Promise<any> {
     if (!res.ok) {
       const errorText = await res.text();
       console.error('❌ [analyzeImage] Erreur réponse:', errorText);
-      return { 
-        error: true, 
-        status: res.status,
-        message: `Erreur ${res.status}: ${res.statusText}` 
-      };
+      return { error: true, status: res.status, message: `Erreur ${res.status}: ${res.statusText}` };
     }
     
     const data = await res.json();
@@ -838,10 +831,7 @@ export async function analyzeImage(file: File): Promise<any> {
     return data;
   } catch (error) {
     console.error('❌ [analyzeImage] Exception:', error);
-    return { 
-      error: true, 
-      message: error instanceof Error ? error.message : 'Erreur inconnue' 
-    };
+    return { error: true, message: error instanceof Error ? error.message : 'Erreur inconnue' };
   }
 }
 
@@ -880,6 +870,7 @@ export async function getAdminConfig(): Promise<any> {
     const token = getAuthToken();
     const headers: Record<string, string> = {
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     if (token) {
@@ -913,6 +904,7 @@ export async function updateConfig(config: any): Promise<boolean> {
   try {
     const testRes = await fetch(`${API_BASE}/api/v1/heartbeat`, { 
       method: 'GET',
+      headers: { ...NGROK_HEADER }, // ✅ FIX NGROK
       signal: AbortSignal.timeout(2000)
     });
     if (!testRes.ok) {
@@ -930,14 +922,13 @@ export async function updateConfig(config: any): Promise<boolean> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
       console.log('🔑 [updateConfig] Token présent');
     }
-    
-    console.log('📤 [updateConfig] Envoi requête vers:', `${API_BASE}/api/v1/admin/config`);
     
     const res = await fetch(`${API_BASE}/api/v1/admin/config`, {
       method: 'POST',
@@ -956,11 +947,7 @@ export async function updateConfig(config: any): Promise<boolean> {
     }
     
     if (!res.ok) {
-      console.error('❌ [updateConfig] Erreur HTTP:', {
-        status: res.status,
-        statusText: res.statusText,
-        body: responseData
-      });
+      console.error('❌ [updateConfig] Erreur HTTP:', { status: res.status, statusText: res.statusText, body: responseData });
       return false;
     }
     
@@ -993,9 +980,7 @@ export async function getCacheStats(): Promise<any> {
 
 export async function clearCache(): Promise<boolean> {
   try {
-    const res = await fetchWithAuth(`${API_BASE}/api/v1/ai/clear-cache`, {
-      method: 'POST',
-    });
+    const res = await fetchWithAuth(`${API_BASE}/api/v1/ai/clear-cache`, { method: 'POST' });
     return res.ok;
   } catch {
     return false;
@@ -1013,16 +998,14 @@ export async function fetchDevices(): Promise<Device[]> {
     const token = getAuthToken();
     const headers: Record<string, string> = {
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
     
-    const res = await fetch(`${API_BASE}/api/v1/devices`, {
-      method: 'GET',
-      headers,
-    });
+    const res = await fetch(`${API_BASE}/api/v1/devices`, { method: 'GET', headers });
     
     console.log('📥 [fetchDevices] Status:', res.status);
     
@@ -1032,7 +1015,6 @@ export async function fetchDevices(): Promise<Device[]> {
     }
     
     const responseText = await res.text();
-    
     if (!responseText) {
       console.log('📥 [fetchDevices] Réponse vide');
       return [];
@@ -1059,22 +1041,16 @@ export async function fetchDevice(deviceId: string): Promise<Device | null> {
     const token = getAuthToken();
     const headers: Record<string, string> = {
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
     
-    const res = await fetch(`${API_BASE}/api/v1/devices/${deviceId}`, {
-      method: 'GET',
-      headers,
-    });
+    const res = await fetch(`${API_BASE}/api/v1/devices/${deviceId}`, { method: 'GET', headers });
     
-    console.log('📥 [fetchDevice] Status:', res.status);
-    
-    if (!res.ok) {
-      return null;
-    }
+    if (!res.ok) return null;
     
     const data = await res.json();
     console.log('✅ [fetchDevice] Succès:', data);
@@ -1089,18 +1065,16 @@ export async function addDevice(device: Partial<Device>): Promise<Device | null>
   try {
     console.log('📤 [addDevice] Données reçues:', device);
     
-    // Vérification de l'ID (obligatoire)
     if (!device.device_id || String(device.device_id).trim() === '') {
       console.error('❌ [addDevice] device_id est requis');
       return null;
     }
     
-    // Valeurs par défaut pour les champs optionnels
     const deviceData = {
       device_id: String(device.device_id).trim(),
       name: device.name || String(device.device_id).trim(),
-      location: "ESP32 Device",  // Valeur par défaut
-      zone: "Zone A",            // Valeur par défaut
+      location: "ESP32 Device",
+      zone: "Zone A",
       panel_type: "Monocristallin",
       panel_capacity_kw: 3.0,
       panel_area_m2: 1.6,
@@ -1108,26 +1082,19 @@ export async function addDevice(device: Partial<Device>): Promise<Device | null>
       status: device.status || 'active',
     };
     
-    console.log('📤 [addDevice] Données formatées:', deviceData);
-    
     let token = getAuthToken();
     if (!token) {
-      console.log('⚠️ [addDevice] Pas de token, tentative d\'enregistrement...');
       const registered = await registerDevice('dashboard');
-      if (!registered) {
-        console.error('❌ [addDevice] Impossible d\'obtenir un token');
-        return null;
-      }
+      if (!registered) return null;
       token = getAuthToken();
     }
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
-    
-    console.log('📤 [addDevice] Envoi vers:', `${API_BASE}/api/v1/devices`);
     
     const res = await fetch(`${API_BASE}/api/v1/devices`, {
       method: 'POST',
@@ -1138,17 +1105,12 @@ export async function addDevice(device: Partial<Device>): Promise<Device | null>
     console.log('📥 [addDevice] Status:', res.status, res.statusText);
     
     if (res.status === 401) {
-      console.warn('⚠️ [addDevice] Token expiré, tentative de ré-enregistrement...');
       const registered = await registerDevice('dashboard');
-      if (registered) {
-        return addDevice(device);
-      }
+      if (registered) return addDevice(device);
       return null;
     }
     
     const responseText = await res.text();
-    console.log('📥 [addDevice] Réponse brute:', responseText);
-    
     if (!res.ok) {
       console.error('❌ [addDevice] Erreur:', responseText);
       return null;
@@ -1171,27 +1133,21 @@ export async function addDevice(device: Partial<Device>): Promise<Device | null>
 export async function updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device | null> {
   try {
     console.log('📤 [updateDevice] Device ID:', deviceId);
-    console.log('📤 [updateDevice] Updates:', updates);
     
     const token = getAuthToken();
     if (!token) {
-      console.warn('⚠️ [updateDevice] Pas de token, tentative de ré-enregistrement...');
       const registered = await registerDevice('dashboard');
-      if (!registered) {
-        console.error('❌ [updateDevice] Impossible de s\'authentifier');
-        return null;
-      }
+      if (!registered) return null;
     }
     
     const newToken = getAuthToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    if (newToken) {
-      headers['Authorization'] = `Bearer ${newToken}`;
-    }
+    if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
     
     const res = await fetch(`${API_BASE}/api/v1/devices/${encodeURIComponent(deviceId)}`, {
       method: 'PUT',
@@ -1202,11 +1158,8 @@ export async function updateDevice(deviceId: string, updates: Partial<Device>): 
     console.log('📥 [updateDevice] Status:', res.status, res.statusText);
     
     if (res.status === 401) {
-      console.warn('⚠️ [updateDevice] Token invalide, nouvelle tentative...');
       const registered = await registerDevice('dashboard');
-      if (registered) {
-        return updateDevice(deviceId, updates);
-      }
+      if (registered) return updateDevice(deviceId, updates);
     }
     
     if (!res.ok) {
@@ -1230,19 +1183,16 @@ export async function deleteDevice(deviceId: string): Promise<boolean> {
     
     let token = getAuthToken();
     if (!token) {
-      console.warn('⚠️ [deleteDevice] Pas de token, tentative de ré-enregistrement...');
       const registered = await registerDevice('dashboard');
-      if (!registered) {
-        console.error('❌ [deleteDevice] Impossible d\'obtenir un token');
-        return false;
-      }
+      if (!registered) return false;
       token = getAuthToken();
     }
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/devices/${encodeURIComponent(deviceId)}`, {
@@ -1252,31 +1202,21 @@ export async function deleteDevice(deviceId: string): Promise<boolean> {
     
     console.log('📥 [deleteDevice] Status:', res.status);
     
-    // Si token expiré (401), on réessaie une fois
     if (res.status === 401) {
-      console.warn('⚠️ [deleteDevice] Token expiré, tentative de ré-enregistrement...');
       const registered = await registerDevice('dashboard');
       if (registered) {
         const newToken = getAuthToken();
         const newHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
           'X-Timezone': getUserTimezone(),
-          'Authorization': `Bearer ${newToken}`
+          'Authorization': `Bearer ${newToken}`,
+          ...NGROK_HEADER, // ✅ FIX NGROK
         };
-        
         const retryRes = await fetch(`${API_BASE}/api/v1/devices/${encodeURIComponent(deviceId)}`, {
           method: 'DELETE',
           headers: newHeaders,
         });
-        
-        if (retryRes.ok) {
-          console.log('✅ [deleteDevice] Succès après renouvellement du token');
-          return true;
-        } else {
-          const errorText = await retryRes.text();
-          console.error('❌ [deleteDevice] Erreur après renouvellement:', errorText);
-          return false;
-        }
+        return retryRes.ok;
       }
     }
     
@@ -1305,7 +1245,6 @@ export async function fetchSoilingHistory(
   try {
     let url = `${API_BASE}/api/v1/soiling/history?days=${days}`;
     if (deviceId) url += `&device_id=${deviceId}`;
-    
     const res = await fetchWithAuth(url);
     return await res.json();
   } catch {
@@ -1349,7 +1288,6 @@ export async function fetchAlerts(
     if (severity) url += `&severity=${severity}`;
     if (resolved !== undefined) url += `&resolved=${resolved}`;
     if (deviceId) url += `&device_id=${deviceId}`;
-    
     const res = await fetchWithAuth(url);
     return await res.json();
   } catch {
@@ -1394,9 +1332,7 @@ export async function resolveAlert(alertId: string, notes?: string): Promise<Ale
 
 export async function deleteAlert(alertId: string): Promise<boolean> {
   try {
-    const res = await fetchWithAuth(`${API_BASE}/api/v1/alerts/${alertId}`, {
-      method: 'DELETE',
-    });
+    const res = await fetchWithAuth(`${API_BASE}/api/v1/alerts/${alertId}`, { method: 'DELETE' });
     return res.ok;
   } catch {
     return false;
@@ -1414,7 +1350,6 @@ export async function fetchPerformanceKPIs(
   try {
     let url = `${API_BASE}/api/v1/performance/kpis?period=${period}`;
     if (deviceId) url += `&device_id=${deviceId}`;
-    
     const res = await fetchWithAuth(url);
     return await res.json();
   } catch {
@@ -1433,7 +1368,6 @@ export async function fetchMaintenanceLogs(
   try {
     let url = `${API_BASE}/api/v1/maintenance/logs?limit=${limit}`;
     if (deviceId) url += `&device_id=${deviceId}`;
-    
     const res = await fetchWithAuth(url);
     return await res.json();
   } catch {
@@ -1501,12 +1435,15 @@ export async function downloadReport(reportId: string): Promise<void> {
 
 export async function login(email: string, password: string): Promise<LoginResponse | null> {
   try {
-    console.log('📤 [login] URL:', `${API_BASE}/api/v1/auth/login`);
-    console.log('📤 [login] Données:', { email, password: '***' });
+    console.log('📤 Tentative login pour:', email);
+    console.log('📤 URL:', `${API_BASE}/api/v1/auth/login`);
     
     const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK — critique pour le login
+      },
       body: JSON.stringify({ email, password }),
     });
     
@@ -1519,11 +1456,11 @@ export async function login(email: string, password: string): Promise<LoginRespo
     }
     
     const data = await res.json();
-    console.log('✅ [login] Succès:', data);
+    console.log('✅ [login] Succès');
     setAuthToken(data.access_token);
     return data;
   } catch (error) {
-    console.error('❌ [login] Exception:', error);
+    console.error('❌ Erreur de connexion:', error);
     return null;
   }
 }
@@ -1534,16 +1471,18 @@ export async function login(email: string, password: string): Promise<LoginRespo
 
 export async function sendVerificationCode(email: string): Promise<SendVerificationCodeResponse | null> {
   try {
-    console.log('📤 [sendVerificationCode] URL:', `${API_BASE}/api/v1/auth/send-verification-code`);
-    console.log('📤 [sendVerificationCode] Données:', { email });
+    console.log('📤 [sendVerificationCode] Email:', email);
     
     const res = await fetch(`${API_BASE}/api/v1/auth/send-verification-code`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify({ email }),
     });
     
-    console.log('📥 [sendVerificationCode] Status:', res.status, res.statusText);
+    console.log('📥 [sendVerificationCode] Status:', res.status);
     
     if (res.ok) {
       const data = await res.json();
@@ -1562,20 +1501,21 @@ export async function sendVerificationCode(email: string): Promise<SendVerificat
 
 export async function verifyCode(email: string, code: string): Promise<VerifyCodeResponse | null> {
   try {
-    console.log('📤 [verifyCode] URL:', `${API_BASE}/api/v1/auth/verify-code`);
-    console.log('📤 [verifyCode] Données:', { email, code });
+    console.log('📤 [verifyCode] Email:', email);
     
     const res = await fetch(`${API_BASE}/api/v1/auth/verify-code`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify({ email, code }),
     });
     
-    console.log('📥 [verifyCode] Status:', res.status, res.statusText);
+    console.log('📥 [verifyCode] Status:', res.status);
     
     if (res.ok) {
       const data = await res.json();
-      console.log('✅ [verifyCode] Succès:', data);
       return data;
     } else {
       const errorText = await res.text();
@@ -1596,13 +1536,14 @@ export async function completeRegistration(
   tempToken?: string
 ): Promise<LoginResponse | null> {
   try {
-    console.log('📤 [completeRegistration] URL:', `${API_BASE}/api/v1/auth/complete-registration`);
-    console.log('📤 [completeRegistration] Données:', { email, code, name, password: '***' });
+    console.log('📤 [completeRegistration] Email:', email);
     
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADER, // ✅ FIX NGROK
+    };
     if (tempToken) {
       headers['Authorization'] = `Bearer ${tempToken}`;
-      console.log('🔑 [completeRegistration] Avec token temporaire');
     }
     
     const res = await fetch(`${API_BASE}/api/v1/auth/complete-registration`, {
@@ -1611,11 +1552,10 @@ export async function completeRegistration(
       body: JSON.stringify({ email, code, name, password }),
     });
     
-    console.log('📥 [completeRegistration] Status:', res.status, res.statusText);
+    console.log('📥 [completeRegistration] Status:', res.status);
     
     if (res.ok) {
       const data = await res.json();
-      console.log('✅ [completeRegistration] Succès:', data);
       setAuthToken(data.access_token);
       return data;
     } else {
@@ -1640,21 +1580,21 @@ export function isValidEmailFormat(email: string): boolean {
 
 export async function forgotPassword(email: string): Promise<{ message: string; success: boolean } | null> {
   try {
-    console.log('📤 [forgotPassword] URL:', `${API_BASE}/api/v1/auth/forgot-password`);
-    console.log('📤 [forgotPassword] Données:', { email });
+    console.log('📤 [forgotPassword] Email:', email);
     
     const res = await fetch(`${API_BASE}/api/v1/auth/forgot-password`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify({ email }),
     });
     
-    console.log('📥 [forgotPassword] Status:', res.status, res.statusText);
+    console.log('📥 [forgotPassword] Status:', res.status);
     
     if (res.ok) {
-      const data = await res.json();
-      console.log('✅ [forgotPassword] Succès:', data);
-      return data;
+      return await res.json();
     } else {
       const errorText = await res.text();
       console.log('❌ [forgotPassword] Erreur:', errorText);
@@ -1668,21 +1608,21 @@ export async function forgotPassword(email: string): Promise<{ message: string; 
 
 export async function resetPassword(token: string, newPassword: string): Promise<{ message: string; success: boolean } | null> {
   try {
-    console.log('📤 [resetPassword] URL:', `${API_BASE}/api/v1/auth/reset-password`);
-    console.log('📤 [resetPassword] Données:', { token: token.substring(0, 10) + '...', newPassword: '***' });
+    console.log('📤 [resetPassword] Token:', token.substring(0, 10) + '...');
     
     const res = await fetch(`${API_BASE}/api/v1/auth/reset-password`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...NGROK_HEADER, // ✅ FIX NGROK
+      },
       body: JSON.stringify({ token, new_password: newPassword }),
     });
     
-    console.log('📥 [resetPassword] Status:', res.status, res.statusText);
+    console.log('📥 [resetPassword] Status:', res.status);
     
     if (res.ok) {
-      const data = await res.json();
-      console.log('✅ [resetPassword] Succès:', data);
-      return data;
+      return await res.json();
     } else {
       const errorText = await res.text();
       console.log('❌ [resetPassword] Erreur:', errorText);
@@ -1700,7 +1640,7 @@ export async function resetPassword(token: string, newPassword: string): Promise
 
 export async function fetchUsers(): Promise<User[]> {
   try {
-    console.log('📤 [fetchUsers] Début - Récupération des utilisateurs');
+    console.log('📤 [fetchUsers] Début');
     
     const token = getAuthToken();
     if (!token) {
@@ -1711,13 +1651,11 @@ export async function fetchUsers(): Promise<User[]> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(`${API_BASE}/api/v1/admin/users`, {
-      method: 'GET',
-      headers,
-    });
+    const res = await fetch(`${API_BASE}/api/v1/admin/users`, { method: 'GET', headers });
     
     console.log('📥 [fetchUsers] Status:', res.status);
     
@@ -1738,7 +1676,7 @@ export async function fetchUsers(): Promise<User[]> {
 
 export async function addUser(user: Partial<User>): Promise<User | null> {
   try {
-    console.log('📤 [addUser] Données reçues:', user);
+    console.log('📤 [addUser] Données:', user);
     
     const token = getAuthToken();
     if (!token) {
@@ -1749,7 +1687,8 @@ export async function addUser(user: Partial<User>): Promise<User | null> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/admin/users`, {
@@ -1778,7 +1717,6 @@ export async function addUser(user: Partial<User>): Promise<User | null> {
 export async function updateUser(userId: string, updates: Partial<User>): Promise<User | null> {
   try {
     console.log('📤 [updateUser] User ID:', userId);
-    console.log('📤 [updateUser] Updates:', updates);
     
     const token = getAuthToken();
     if (!token) {
@@ -1789,7 +1727,8 @@ export async function updateUser(userId: string, updates: Partial<User>): Promis
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/admin/users/${userId}`, {
@@ -1798,7 +1737,7 @@ export async function updateUser(userId: string, updates: Partial<User>): Promis
       body: JSON.stringify(updates),
     });
     
-    console.log('📥 [updateUser] Status:', res.status, res.statusText);
+    console.log('📥 [updateUser] Status:', res.status);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -1828,15 +1767,13 @@ export async function deleteUser(userId: string): Promise<boolean> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(`${API_BASE}/api/v1/admin/users/${userId}`, {
-      method: 'DELETE',
-      headers,
-    });
+    const res = await fetch(`${API_BASE}/api/v1/admin/users/${userId}`, { method: 'DELETE', headers });
     
-    console.log('📥 [deleteUser] Status:', res.status, res.statusText);
+    console.log('📥 [deleteUser] Status:', res.status);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -1859,13 +1796,9 @@ export async function deleteUser(userId: string): Promise<boolean> {
 export async function fetchLogs(level?: string): Promise<LogEntry[]> {
   try {
     let url = `${API_BASE}/api/v1/admin/logs`;
-    if (level) {
-      url += `?level=${level}`;
-    }
+    if (level) url += `?level=${level}`;
     const res = await fetchWithAuth(url);
-    if (res.ok) {
-      return await res.json();
-    }
+    if (res.ok) return await res.json();
     return [];
   } catch {
     return [];
@@ -1894,7 +1827,6 @@ export async function importConfig(file: File): Promise<boolean> {
   try {
     const formData = new FormData();
     formData.append('file', file);
-    
     const res = await fetchWithAuth(`${API_BASE}/api/v1/admin/config/import`, {
       method: 'POST',
       body: formData,
@@ -1922,15 +1854,11 @@ export async function fetchApiKeys(): Promise<ApiKey[]> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(`${API_BASE}/api/v1/admin/api-keys`, {
-      method: 'GET',
-      headers,
-    });
-    
-    console.log('📥 [fetchApiKeys] Status:', res.status);
+    const res = await fetch(`${API_BASE}/api/v1/admin/api-keys`, { method: 'GET', headers });
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -1939,7 +1867,6 @@ export async function fetchApiKeys(): Promise<ApiKey[]> {
     }
     
     const data = await res.json();
-    console.log('✅ [fetchApiKeys] Succès,', data.length, 'clés');
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('❌ [fetchApiKeys] Exception:', error);
@@ -1949,18 +1876,14 @@ export async function fetchApiKeys(): Promise<ApiKey[]> {
 
 export async function generateApiKey(name: string): Promise<ApiKey | null> {
   try {
-    console.log('📤 [generateApiKey] Nom:', name);
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [generateApiKey] Pas de token');
-      return null;
-    }
+    if (!token) return null;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/admin/api-keys`, {
@@ -1969,17 +1892,8 @@ export async function generateApiKey(name: string): Promise<ApiKey | null> {
       body: JSON.stringify({ name }),
     });
     
-    console.log('📥 [generateApiKey] Status:', res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('❌ [generateApiKey] Erreur:', errorText);
-      return null;
-    }
-    
-    const data = await res.json();
-    console.log('✅ [generateApiKey] Succès:', data);
-    return data;
+    if (!res.ok) return null;
+    return await res.json();
   } catch (error) {
     console.error('❌ [generateApiKey] Exception:', error);
     return null;
@@ -1988,35 +1902,18 @@ export async function generateApiKey(name: string): Promise<ApiKey | null> {
 
 export async function deleteApiKey(keyId: number): Promise<boolean> {
   try {
-    console.log('📤 [deleteApiKey] ID:', keyId);
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [deleteApiKey] Pas de token');
-      return false;
-    }
+    if (!token) return false;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}`, {
-      method: 'DELETE',
-      headers,
-    });
-    
-    console.log('📥 [deleteApiKey] Status:', res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('❌ [deleteApiKey] Erreur:', errorText);
-      return false;
-    }
-    
-    console.log('✅ [deleteApiKey] Succès');
-    return true;
+    const res = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}`, { method: 'DELETE', headers });
+    return res.ok;
   } catch (error) {
     console.error('❌ [deleteApiKey] Exception:', error);
     return false;
@@ -2029,35 +1926,21 @@ export async function deleteApiKey(keyId: number): Promise<boolean> {
 
 export async function fetchActivityLogs(limit: number = 20): Promise<ActivityLog[]> {
   try {
-    console.log('📤 [fetchActivityLogs] Début');
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [fetchActivityLogs] Pas de token');
-      return [];
-    }
+    if (!token) return [];
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(`${API_BASE}/api/v1/admin/activity-logs?limit=${limit}`, {
-      method: 'GET',
-      headers,
-    });
+    const res = await fetch(`${API_BASE}/api/v1/admin/activity-logs?limit=${limit}`, { method: 'GET', headers });
     
-    console.log('📥 [fetchActivityLogs] Status:', res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('❌ [fetchActivityLogs] Erreur:', errorText);
-      return [];
-    }
+    if (!res.ok) return [];
     
     const data = await res.json();
-    console.log('✅ [fetchActivityLogs] Succès,', data.length, 'logs');
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('❌ [fetchActivityLogs] Exception:', error);
@@ -2067,18 +1950,14 @@ export async function fetchActivityLogs(limit: number = 20): Promise<ActivityLog
 
 export async function updatePreferences(preferences: UserPreferences): Promise<boolean> {
   try {
-    console.log('📤 [updatePreferences] Données:', preferences);
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [updatePreferences] Pas de token');
-      return false;
-    }
+    if (!token) return false;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/user/preferences`, {
@@ -2087,15 +1966,12 @@ export async function updatePreferences(preferences: UserPreferences): Promise<b
       body: JSON.stringify(preferences),
     });
     
-    console.log('📥 [updatePreferences] Status:', res.status);
-    
     if (!res.ok) {
       const errorText = await res.text();
       console.error('❌ [updatePreferences] Erreur:', errorText);
       return false;
     }
     
-    console.log('✅ [updatePreferences] Succès');
     return true;
   } catch (error) {
     console.error('❌ [updatePreferences] Exception:', error);
@@ -2128,13 +2004,11 @@ export async function fetchInterventions(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
-    const res = await fetch(url, {
-      method: 'GET',
-      headers,
-    });
+    const res = await fetch(url, { method: 'GET', headers });
     
     console.log('📥 [fetchInterventions] Status:', res.status);
     
@@ -2158,15 +2032,13 @@ export async function createIntervention(intervention: Partial<Intervention>): P
     console.log('📤 [createIntervention] Données:', intervention);
     
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [createIntervention] Pas de token');
-      return null;
-    }
+    if (!token) return null;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/maintenance/interventions`, {
@@ -2197,18 +2069,14 @@ export async function updateIntervention(
   updates: Partial<Intervention>
 ): Promise<Intervention | null> {
   try {
-    console.log('📤 [updateIntervention] ID:', interventionId, 'Updates:', updates);
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [updateIntervention] Pas de token');
-      return null;
-    }
+    if (!token) return null;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/maintenance/interventions/${interventionId}`, {
@@ -2217,17 +2085,13 @@ export async function updateIntervention(
       body: JSON.stringify(updates),
     });
     
-    console.log('📥 [updateIntervention] Status:', res.status);
-    
     if (!res.ok) {
       const errorText = await res.text();
       console.error('❌ [updateIntervention] Erreur:', errorText);
       return null;
     }
     
-    const data = await res.json();
-    console.log('✅ [updateIntervention] Succès:', data);
-    return data;
+    return await res.json();
   } catch (error) {
     console.error('❌ [updateIntervention] Exception:', error);
     return null;
@@ -2236,26 +2100,20 @@ export async function updateIntervention(
 
 export async function deleteIntervention(interventionId: string): Promise<boolean> {
   try {
-    console.log('📤 [deleteIntervention] ID:', interventionId);
-    
     const token = getAuthToken();
-    if (!token) {
-      console.error('❌ [deleteIntervention] Pas de token');
-      return false;
-    }
+    if (!token) return false;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/maintenance/interventions/${interventionId}`, {
       method: 'DELETE',
       headers,
     });
-    
-    console.log('📥 [deleteIntervention] Status:', res.status);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -2270,17 +2128,14 @@ export async function deleteIntervention(interventionId: string): Promise<boolea
     return false;
   }
 }
+
 // ============================================================
 // 6.22 SUPPRESSION DES DONNÉES (ADMIN)
 // ============================================================
 
-/**
- * Supprime toutes les données d'une collection
- * @param collection - 'surveillance', 'devices', 'interventions', 'alerts'
- */
 export async function deleteAllData(collection: string): Promise<{ status: string; message: string; deleted_count: number } | null> {
   try {
-    console.log(`📤 [deleteAllData] Suppression collection: ${collection}`);
+    console.log(`📤 [deleteAllData] Collection: ${collection}`);
     
     const token = getAuthToken();
     if (!token) {
@@ -2291,7 +2146,8 @@ export async function deleteAllData(collection: string): Promise<{ status: strin
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/admin/delete-all-data?collection=${collection}`, {
@@ -2310,17 +2166,12 @@ export async function deleteAllData(collection: string): Promise<{ status: strin
     const data = await res.json();
     console.log('✅ [deleteAllData] Succès:', data);
     return data;
-    
   } catch (error) {
     console.error('❌ [deleteAllData] Exception:', error);
     return null;
   }
 }
 
-/**
- * Supprime les données plus anciennes que X jours
- * @param days - Nombre de jours de rétention
- */
 export async function deleteOldData(days: number): Promise<{ status: string; message: string; deleted_measurements: number; deleted_interventions: number } | null> {
   try {
     console.log(`📤 [deleteOldData] Suppression données > ${days} jours`);
@@ -2334,7 +2185,8 @@ export async function deleteOldData(days: number): Promise<{ status: string; mes
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Timezone': getUserTimezone(),
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      ...NGROK_HEADER, // ✅ FIX NGROK
     };
     
     const res = await fetch(`${API_BASE}/api/v1/admin/delete-old-data?days=${days}`, {
@@ -2353,7 +2205,6 @@ export async function deleteOldData(days: number): Promise<{ status: string; mes
     const data = await res.json();
     console.log('✅ [deleteOldData] Succès:', data);
     return data;
-    
   } catch (error) {
     console.error('❌ [deleteOldData] Exception:', error);
     return null;
@@ -2364,15 +2215,10 @@ export async function deleteOldData(days: number): Promise<{ status: string; mes
 // 6.23 CONFIGURATION DES PANNEAUX
 // ============================================================
 
-/**
- * Récupère la configuration des panneaux solaires
- */
 export async function getPanelConfig(): Promise<any> {
   try {
     const res = await fetchWithAuth(`${API_BASE}/api/v1/admin/panel-config`);
-    if (res.ok) {
-      return await res.json();
-    }
+    if (res.ok) return await res.json();
     return null;
   } catch (error) {
     console.error('❌ Erreur chargement config panneaux:', error);
@@ -2380,10 +2226,6 @@ export async function getPanelConfig(): Promise<any> {
   }
 }
 
-/**
- * Met à jour la configuration des panneaux solaires
- * @param config - Configuration des panneaux
- */
 export async function updatePanelConfig(config: any): Promise<boolean> {
   try {
     const res = await fetchWithAuth(`${API_BASE}/api/v1/admin/panel-config`, {
@@ -2397,12 +2239,11 @@ export async function updatePanelConfig(config: any): Promise<boolean> {
     return false;
   }
 }
+
 // ============================================================
-// 7. FONCTIONS DE PARSING DE DATES (CORRIGÉ)
+// 7. FONCTIONS DE PARSING DE DATES
 // ============================================================
-/**
- * Parse une date dans différents formats (MongoDB, ISO, français)
- */
+
 function parseDate(dateInput: any): Date | null {
   if (!dateInput) return null;
   
@@ -2411,29 +2252,21 @@ function parseDate(dateInput: any): Date | null {
   }
   
   if (typeof dateInput === 'object' && dateInput !== null) {
-    if (dateInput.$date) {
-      return parseDate(dateInput.$date);
-    }
+    if (dateInput.$date) return parseDate(dateInput.$date);
     console.warn('⚠️ Objet date inattendu:', dateInput);
     return null;
   }
   
   if (typeof dateInput === 'number') {
-    if (dateInput > 10000000000) {
-      return new Date(dateInput);
-    } else {
-      return new Date(dateInput * 1000);
-    }
+    return new Date(dateInput > 10000000000 ? dateInput : dateInput * 1000);
   }
   
   if (typeof dateInput === 'string') {
     const trimmed = dateInput.trim();
     if (trimmed === '') return null;
     
-    // 🔧 CORRECTION : Si le timestamp n'a pas de timezone, ajouter 'Z' (UTC)
     let dateStr = trimmed;
     if (!dateStr.includes('+') && !dateStr.includes('Z') && !dateStr.includes('-')) {
-      // Si c'est un format ISO sans timezone, ajouter Z pour UTC
       if (dateStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
         dateStr = dateStr + 'Z';
       }
@@ -2442,13 +2275,11 @@ function parseDate(dateInput: any): Date | null {
     let date = new Date(dateStr);
     if (!isNaN(date.getTime())) return date;
     
-    // Essayer avec remplacement de l'espace
     if (trimmed.includes('-') && trimmed.includes(':')) {
       date = new Date(trimmed.replace(' ', 'T') + 'Z');
       if (!isNaN(date.getTime())) return date;
     }
     
-    // Format français "JJ/MM/AAAA HH:MM"
     const frenchMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/);
     if (frenchMatch) {
       const [_, day, month, year, hour, minute] = frenchMatch;
@@ -2463,83 +2294,54 @@ function parseDate(dateInput: any): Date | null {
   console.warn('⚠️ Type de date non supporté:', typeof dateInput, dateInput);
   return null;
 }
+
 // ============================================================
 // 8. FONCTIONS UTILITAIRES (formatage, couleurs)
 // ============================================================
 
-/**
- * Formate une heure
- */
 export function fmtTime(iso: string): string {
   try {
     const date = parseDate(iso);
     if (!date) return '--:--';
-    return date.toLocaleTimeString('fr-FR', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
+    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
   } catch (e) {
     return '--:--';
   }
 }
 
-/**
- * Formate une date
- */
 export function fmtDate(iso: string): string {
   try {
     const date = parseDate(iso);
     if (!date) return '--/--/----';
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   } catch {
     return '--/--/----';
   }
 }
 
-/**
- * Formate une date et une heure
- */
 export function fmtDateTime(iso: string): string {
   try {
     const date = parseDate(iso);
     if (!date) return 'Date invalide';
     return date.toLocaleString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false
     });
   } catch (e) {
     return 'Date invalide';
   }
 }
 
-/**
- * Formate un jour
- */
 export function fmtDay(dayStr: string): string {
   try {
     const date = parseDate(dayStr);
     if (!date) return '--/--';
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit'
-    });
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
   } catch {
     return '--/--';
   }
 }
 
-/**
- * Retourne la couleur associée à un statut
- */
 export function statusColor(status: string): string {
   switch (status) {
     case 'Clean': return '#1a7f4f';
@@ -2549,9 +2351,6 @@ export function statusColor(status: string): string {
   }
 }
 
-/**
- * Retourne la couleur de fond associée à un statut
- */
 export function statusBg(status: string): string {
   switch (status) {
     case 'Clean': return '#e4f3ea';
@@ -2561,9 +2360,6 @@ export function statusBg(status: string): string {
   }
 }
 
-/**
- * Retourne la couleur associée à une sévérité d'alerte
- */
 export function severityColor(severity: string): string {
   switch (severity) {
     case 'info': return '#1565c0';
@@ -2573,9 +2369,6 @@ export function severityColor(severity: string): string {
   }
 }
 
-/**
- * Retourne la couleur associée à une urgence
- */
 export function urgencyColor(urgency: string): string {
   switch (urgency) {
     case 'low': return '#1a7f4f';
