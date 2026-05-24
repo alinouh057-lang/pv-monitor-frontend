@@ -14,6 +14,16 @@ interface HistoryTableProps {
   onSelectAll: () => void;
 }
 
+// ============================================================
+// FONCTION UTILITAIRE POUR FORMATER LES NOMBRES EN SÉCURITÉ
+// ============================================================
+const safeToFixed = (value: number | undefined | null, decimals: number = 1): string => {
+  if (value === undefined || value === null || isNaN(value)) {
+    return '—';
+  }
+  return value.toFixed(decimals);
+};
+
 export default function HistoryTable({
   data,
   sortField,
@@ -66,9 +76,9 @@ export default function HistoryTable({
           {data.length === 0 ? (
             <tr><td colSpan={9} style={{ padding: '28px', textAlign: 'center', color: C.text3 }}>Aucune donnée</td></tr>
           ) : data.map((doc, index) => {
-            const ai = doc.ai_analysis;
-            const ed = doc.electrical_data;
-            const sc = statusColor(ai.status);
+            const ai = doc.ai_analysis || {};      // ← fallback si undefined
+            const ed = doc.electrical_data || {};  // ← fallback si undefined
+            const sc = statusColor(ai.status || 'Clean');
             const StatusIcon = ai.status === 'Clean' ? CheckCircle : ai.status === 'Warning' ? AlertTriangle : AlertCircle;
             return (
               <tr key={`row-${doc._id || `${doc.timestamp}-${doc.device_id}`}-${index}`} style={{ background: index % 2 === 0 ? C.surface2 : C.surface }}>
@@ -83,7 +93,7 @@ export default function HistoryTable({
                     borderRadius: 99,
                     fontSize: 11,
                     fontWeight: 700,
-                    background: statusBg(ai.status),
+                    background: statusBg(ai.status || 'Clean'),
                     color: sc,
                     display: 'flex',
                     alignItems: 'center',
@@ -91,14 +101,29 @@ export default function HistoryTable({
                     width: 'fit-content'
                   }}>
                     <StatusIcon size={12} />
-                    {ai.status}
+                    {ai.status || 'Unknown'}
                   </span>
                 </td>
-                <td style={{ padding: '9px 13px', fontWeight: 700, color: sc }}>{ai.soiling_level.toFixed(1)}%</td>
-                <td style={{ padding: '9px 13px' }}>{(ai.confidence * 100).toFixed(1)}%</td>
-                <td style={{ padding: '9px 13px' }}>{ed.power_output.toFixed(1)} W</td>
-                <td style={{ padding: '9px 13px' }}>{ed.voltage.toFixed(1)} V</td>
-                <td style={{ padding: '9px 13px' }}>{ed.current.toFixed(2)} A</td>
+                {/* ✅ ENSABLEMENT - avec safeToFixed */}
+                <td style={{ padding: '9px 13px', fontWeight: 700, color: sc }}>
+                  {safeToFixed(ai.soiling_level, 1)}%
+                </td>
+                {/* ✅ CONFIANCE - avec safeToFixed */}
+                <td style={{ padding: '9px 13px' }}>
+                  {ai.confidence !== undefined ? safeToFixed(ai.confidence * 100, 1) : '—'}%
+                </td>
+                {/* ✅ PUISSANCE - avec safeToFixed */}
+                <td style={{ padding: '9px 13px' }}>
+                  {safeToFixed(ed.power_output, 1)} W
+                </td>
+                {/* ✅ TENSION - avec safeToFixed */}
+                <td style={{ padding: '9px 13px' }}>
+                  {safeToFixed(ed.voltage, 1)} V
+                </td>
+                {/* ✅ COURANT - avec safeToFixed (2 décimales) */}
+                <td style={{ padding: '9px 13px' }}>
+                  {safeToFixed(ed.current, 2)} A
+                </td>
               </tr>
             );
           })}
